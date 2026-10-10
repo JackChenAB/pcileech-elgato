@@ -15,30 +15,50 @@ module pcileech_pcie_tlp_a7(
     input                   clk_pcie,
     input                   clk_sys,
     IfPCIeFifoTlp.mp_pcie   dfifo,
-    
+
     // PCIe core receive/transmit data
     IfAXIS128.source        tlps_tx,
     IfAXIS128.sink_lite     tlps_rx,
     IfAXIS128.sink          tlps_static,
     IfShadow2Fifo.shadow    dshadow2fifo,
-    input [15:0]            pcie_id
+    input [15:0]            pcie_id,
+    output                  mz_int_req   // mz0380 DMA engine -> INTx (via pcie_a7)
     );
-    
+
     IfAXIS128 tlps_bar_rsp();
     IfAXIS128 tlps_cfg_rsp();
-    
+    IfAXIS128 tlps_mz_dma();
+
+    // mz0380 event bus (bar_controller <-> DMA engine)
+    wire [255:0]    mz_vid_base;
+    wire [2:0]      mz_vid_slots;
+    wire            mz_arm;
+    wire            mz_int_ack;
+    wire            mz_int_flag;
+    wire            mz_frame_done;
+    wire [31:0]     mz_frame_token;
+    wire            mz_int_flag_set;
+
     // ------------------------------------------------------------------------
     // Convert received TLPs from PCIe core and transmit onwards:
     // ------------------------------------------------------------------------
     IfAXIS128 tlps_filtered();
-    
+
     pcileech_tlps128_bar_controller i_pcileech_tlps128_bar_controller(
         .rst            ( rst                           ),
         .clk            ( clk_pcie                      ),
         .bar_en         ( dshadow2fifo.bar_en           ),
         .pcie_id        ( pcie_id                       ),
         .tlps_in        ( tlps_rx                       ),
-        .tlps_out       ( tlps_bar_rsp.source           )
+        .tlps_out       ( tlps_bar_rsp.source           ),
+        .mz_vid_base    ( mz_vid_base                   ),
+        .mz_vid_slots   ( mz_vid_slots                  ),
+        .mz_arm         ( mz_arm                        ),
+        .mz_int_ack     ( mz_int_ack                    ),
+        .mz_int_flag    ( mz_int_flag                   ),
+        .mz_int_flag_set( mz_int_flag_set               ),
+        .mz_frame_done  ( mz_frame_done                 ),
+        .mz_frame_token ( mz_frame_token                )
     );
     
     pcileech_tlps128_cfgspace_shadow i_pcileech_tlps128_cfgspace_shadow(
@@ -90,8 +110,29 @@ module pcileech_pcie_tlp_a7(
         .tlps_in1       ( tlps_cfg_rsp.sink             ),
         .tlps_in2       ( tlps_bar_rsp.sink             ),
         .tlps_in3       ( tlps_rx_fifo.sink             ),
-        .tlps_in4       ( tlps_static                   )
+        .tlps_in4       ( tlps_static                   ),
+        .tlps_in5       ( tlps_mz_dma.sink              )
     );
+
+    // ------------------------------------------------------------------------
+    // MZ0380 DMA engine: locally-generated MemWr TLPs (no-signal splash).
+    // Runs on clk_pcie; feeds mux input 5 (lowest priority).
+    // ------------------------------------------------------------------------
+    pcileech_dma_engine i_mz_dma(
+        .rst            ( rst                           ),
+        .clk            ( clk_pcie                      ),
+        .pcie_id        ( pcie_id                       ),
+        .tlps_out       ( tlps_mz_dma.source            ),
+        .mz_vid_base    ( mz_vid_base                   ),
+        .mz_vid_slots   ( mz_vid_slots                  ),
+        .mz_arm         ( mz_arm                        ),
+        .mz_int_ack     ( mz_int_ack                    ),
+        .mz_frame_done  ( mz_frame_done                 ),
+        .mz_frame_token ( mz_frame_token                ),
+        .mz_int_req     ( mz_int_flag_set               )
+    );
+
+    assign mz_int_req = mz_int_flag_set;
 
 endmodule
 
@@ -298,48 +339,56 @@ module pcileech_tlps128_sink_mux1 (
     IfAXIS128.sink              tlps_in1,
     IfAXIS128.sink              tlps_in2,
     IfAXIS128.sink              tlps_in3,
-    IfAXIS128.sink              tlps_in4
+    IfAXIS128.sink              tlps_in4,
+    IfAXIS128.sink              tlps_in5
 );
     bit [2:0] id = 0;
-    
-    assign tlps_out.has_data    = tlps_in1.has_data || tlps_in2.has_data || tlps_in3.has_data || tlps_in4.has_data;
-    
+
+    assign tlps_out.has_data    = tlps_in1.has_data || tlps_in2.has_data || tlps_in3.has_data || tlps_in4.has_data || tlps_in5.has_data;
+
     assign tlps_out.tdata       = (id==1) ? tlps_in1.tdata :
                                   (id==2) ? tlps_in2.tdata :
                                   (id==3) ? tlps_in3.tdata :
-                                  (id==4) ? tlps_in4.tdata : 0;
-    
+                                  (id==4) ? tlps_in4.tdata :
+                                  (id==5) ? tlps_in5.tdata : 0;
+
     assign tlps_out.tkeepdw     = (id==1) ? tlps_in1.tkeepdw :
                                   (id==2) ? tlps_in2.tkeepdw :
                                   (id==3) ? tlps_in3.tkeepdw :
-                                  (id==4) ? tlps_in4.tkeepdw : 0;
-    
+                                  (id==4) ? tlps_in4.tkeepdw :
+                                  (id==5) ? tlps_in5.tkeepdw : 0;
+
     assign tlps_out.tlast       = (id==1) ? tlps_in1.tlast :
                                   (id==2) ? tlps_in2.tlast :
                                   (id==3) ? tlps_in3.tlast :
-                                  (id==4) ? tlps_in4.tlast : 0;
-    
+                                  (id==4) ? tlps_in4.tlast :
+                                  (id==5) ? tlps_in5.tlast : 0;
+
     assign tlps_out.tuser       = (id==1) ? tlps_in1.tuser :
                                   (id==2) ? tlps_in2.tuser :
                                   (id==3) ? tlps_in3.tuser :
-                                  (id==4) ? tlps_in4.tuser : 0;
-    
+                                  (id==4) ? tlps_in4.tuser :
+                                  (id==5) ? tlps_in5.tuser : 0;
+
     assign tlps_out.tvalid      = (id==1) ? tlps_in1.tvalid :
                                   (id==2) ? tlps_in2.tvalid :
                                   (id==3) ? tlps_in3.tvalid :
-                                  (id==4) ? tlps_in4.tvalid : 0;
-    
+                                  (id==4) ? tlps_in4.tvalid :
+                                  (id==5) ? tlps_in5.tvalid : 0;
+
     wire [2:0] id_next_newsel   = tlps_in1.has_data ? 1 :
                                   tlps_in2.has_data ? 2 :
                                   tlps_in3.has_data ? 3 :
-                                  tlps_in4.has_data ? 4 : 0;
-    
+                                  tlps_in4.has_data ? 4 :
+                                  tlps_in5.has_data ? 5 : 0;
+
     wire [2:0] id_next          = ((id==0) || (tlps_out.tvalid && tlps_out.tlast)) ? id_next_newsel : id;
-    
+
     assign tlps_in1.tready      = tlps_out.tready && (id_next==1);
     assign tlps_in2.tready      = tlps_out.tready && (id_next==2);
     assign tlps_in3.tready      = tlps_out.tready && (id_next==3);
     assign tlps_in4.tready      = tlps_out.tready && (id_next==4);
+    assign tlps_in5.tready      = tlps_out.tready && (id_next==5);
     
     always @ ( posedge clk_pcie ) begin
         id <= rst ? 0 : id_next;

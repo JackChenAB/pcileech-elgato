@@ -44,6 +44,7 @@ module pcileech_pcie_a7(
     IfAXIS128               tlps_rx();
     
     IfAXIS128               tlps_static();       // static tlp transmit from cfg->tlp
+    wire                    mz_int_req;          // mz0380 DMA engine -> cfg INTx
     wire [15:0]             pcie_id;
     wire                    user_lnk_up;
     
@@ -74,10 +75,11 @@ module pcileech_pcie_a7(
         .rst                        ( rst_subsys                ),
         .clk_sys                    ( clk_sys                   ),
         .clk_pcie                   ( clk_pcie                  ),
-        .dfifo                      ( dfifo_cfg                 ),        
+        .dfifo                      ( dfifo_cfg                 ),
         .ctx                        ( ctx                       ),
         .tlps_static                ( tlps_static.source        ),
-        .pcie_id                    ( pcie_id                   )   // -> [15:0]
+        .pcie_id                    ( pcie_id                   ),  // -> [15:0]
+        .mz_int_req                 ( mz_int_req                )   // <- [0:0]
     );
     
     // ----------------------------------------------------------------------------
@@ -100,7 +102,8 @@ module pcileech_pcie_a7(
         .tlps_rx                    ( tlps_rx.sink_lite         ),
         .tlps_static                ( tlps_static.sink          ),
         .dshadow2fifo               ( dshadow2fifo              ),
-        .pcie_id                    ( pcie_id                   )   // <- [15:0]
+        .pcie_id                    ( pcie_id                   ),  // <- [15:0]
+        .mz_int_req                 ( mz_int_req                )   // -> [0:0]
     );
     
     pcileech_tlps128_dst64 i_pcileech_tlps128_dst64(

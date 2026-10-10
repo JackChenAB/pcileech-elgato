@@ -65,3 +65,47 @@ It's possible to implement a custom BAR PIO memory region, commonly used by devi
 First, edit the Xilinx PCIe core in Vivado. By default there is one BAR, BAR0 which have 4kB of all-zero read/write memory assigned. This is possible to change.
 
 Secondly, edit the file: `pcileech_tlps128_bar_controller.sv` and follow the instructions in the file to implement custom BAR PIO memory regions.
+
+HD60 Pro (MZ0380) Emulation
+=================
+This tree emulates an Elgato Game Capture HD60 Pro Rev.3 (YUAN MZ0380) with **no
+input signal**: the device enumerates as `12ab:0381`, subsystem `1cfa:0010`,
+class `048000`, and speaks the card's real mailbox / BAR / interrupt / DMA
+protocol (reverse-engineered register map courtesy of the Wolffyx
+hd60pro-linux-driver project, RE_FINDINGS.md milestones cited in the source).
+
+What the FPGA does:
+- BAR0 (1 MiB): command mailbox - INIT, GET_BOARD_VERSION (fw 1.11), SET_BUF
+  (buffer table capture), SET_VIC/SET_ENC/POST_PROC (accept + store),
+  START/STOP streaming, GPIO shadow, bridge register file, MST3367 HDMI
+  receiver model (no-signal detect values), EDID RAM (256B, real dump),
+  LOAD_FILES scratch.
+- BAR5 (4 KiB): SDK property window + INT flag handshake
+  (BAR5[0xdc]=1 on event; ack = write 2, BAR0[0x30]=0, BAR0[0x00]=0x400).
+- On START_STREAMING: one 0x30a5c0-byte "NO SIGNAL" splash burst (NV12
+  720x1080 inside a 1920x1107-based frame, byte geometry per the real card)
+  DMA'd into video slot 0 as 512B-payload MemWr TLPs, then EVENT + frame
+  token + INTx. One frame per START, exactly like the real card's
+  fake-frame path (M38/M39).
+- INTx is the interrupt path (matches the real card); MSI stays advertised
+  but is never fired.
+
+Build steps are unchanged (points 1-6 above). All four board targets carry the
+emulation; the `generate - *.bat` files launch each Vivado project.
+
+Bench expectations:
+- Linux: `lspci -nn -d 12ab:0381` shows subsystem `1cfa:0010` and class `0480`.
+- Wolffyx hd60pro driver: probe completes the mailbox handshake
+  (STATUS stamps), reads fw version 1.11, reports no input signal.
+- Elgato 4K Capture Utility (Windows): enumerates the device as an HD60 Pro
+  and shows the no-signal state; a stream start delivers one splash frame.
+
+Non-goals (live HDMI input, HDCP, H.264 encoding of live video): those run on
+the card's Mozart ARM SoC and are not reproducible on these PCILeech boards.
+
+No-signal splash asset: the generator draws an equivalent "NO SIGNAL" tile.
+For the byte-identical vendor splash, extract `NOSG_LOGO_Y` from the card's
+tinyvenc5 ELF (offset 0x5B10C, sha256
+dfce4efd5139298f544d23473f85a42fb7115a3c5e4ba65b71c070d59883a30b, procedure in
+the Wolffyx RE_FINDINGS.md M127b), then regenerate via
+`python3 tools/gen_logo_mem.py --verify`.

@@ -116,6 +116,13 @@ set files [list \
  [file normalize "${origin_dir}/src/pcileech_pcie_tlp_a7.sv"]\
  [file normalize "${origin_dir}/src/pcileech_tlps128_bar_controller.sv"]\
  [file normalize "${origin_dir}/src/pcileech_tlps128_cfgspace_shadow.sv"]\
+ [file normalize "${origin_dir}/src/pcileech_mz0380_pkg.sv"]\
+ [file normalize "${origin_dir}/src/pcileech_bar_impl_mz0380_mb.sv"]\
+ [file normalize "${origin_dir}/src/pcileech_bar_impl_mz0380_cfg.sv"]\
+ [file normalize "${origin_dir}/src/pcileech_mz0380_periph.sv"]\
+ [file normalize "${origin_dir}/src/pcileech_dma_engine.sv"]\
+ [file normalize "${origin_dir}/src/mz0380_logo.mem"]\
+ [file normalize "${origin_dir}/src/mz0380_edid.mem"]\
  [file normalize "${origin_dir}/src/pcileech_squirrel_top.sv"]\
  [file normalize "${origin_dir}/pcie_7x/pcie_7x_0.v"]\
  [file normalize "${origin_dir}/pcie_7x/pcie_7x_0_axi_basic_rx.v"]\
@@ -202,6 +209,34 @@ set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
 set file "src/pcileech_tlps128_cfgspace_shadow.sv"
 set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
 set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/pcileech_mz0380_pkg.sv"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/pcileech_bar_impl_mz0380_mb.sv"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/pcileech_bar_impl_mz0380_cfg.sv"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/pcileech_mz0380_periph.sv"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/pcileech_dma_engine.sv"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "SystemVerilog" -objects $file_obj
+
+set file "src/mz0380_logo.mem"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "Memory File" -objects $file_obj
+
+set file "src/mz0380_edid.mem"
+set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]
+set_property -name "file_type" -value "Memory File" -objects $file_obj
 
 set file "src/pcileech_squirrel_top.sv"
 set file_obj [get_files -of_objects [get_filesets sources_1] [list "*$file"]]

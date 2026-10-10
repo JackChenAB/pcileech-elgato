@@ -17,7 +17,8 @@ module pcileech_pcie_cfg_a7(
     IfPCIeFifoCfg.mp_pcie   dfifo,
     IfPCIeSignals.mpm       ctx,
     IfAXIS128.source        tlps_static,
-    output [15:0]           pcie_id
+    output [15:0]           pcie_id,
+    input                   mz_int_req   // mz0380 DMA engine INTx request (level)
     );
 
     // ----------------------------------------------------
@@ -92,6 +93,57 @@ module pcileech_pcie_cfg_a7(
     reg     [3:0]       rwi_cfgrd_byte_en;
     reg     [31:0]      rwi_cfgrd_data;
     reg                 rwi_tlp_static_valid;
+
+    // ------------------------------------------------------------------------
+    // MZ0380 INTx request FSM (autonomous interrupt path; the real card drives
+    // INTx, not MSI - Wolffyx RE "Windows uses INTx"). Level handshake:
+    //   mz_int_req rises  -> assert INTx (cfg_interrupt=1, assert=1), wait rdy
+    //   level held        -> assert=0 (assertion complete, interrupt active)
+    //   mz_int_req falls  -> deassert INTx (cfg_interrupt=0, assert=1), wait rdy,
+    //                        then assert=0. Host rw bits win whenever the FSM
+    //                        is inactive (see the ctx.cfg_interrupt mux).
+    // ------------------------------------------------------------------------
+    reg                 rwi_mz_int_active;
+    reg                 rwi_mz_int_assert;
+    reg                 rwi_mz_int_level;
+    reg                 rwi_mz_int_wait;    // waiting for cfg_interrupt_rdy
+
+    always @ ( posedge clk_pcie ) begin
+        if ( rst ) begin
+            rwi_mz_int_active <= 0;
+            rwi_mz_int_assert <= 0;
+            rwi_mz_int_level  <= 0;
+            rwi_mz_int_wait   <= 0;
+        end
+        else begin
+            if ( !rwi_mz_int_active ) begin
+                if ( mz_int_req && !rwi_mz_int_wait ) begin
+                    // raise: assert INTx
+                    rwi_mz_int_active <= 1;
+                    rwi_mz_int_level  <= 1;
+                    rwi_mz_int_assert <= 1;
+                    rwi_mz_int_wait   <= 1;
+                end
+            end
+            else begin
+                if ( rwi_mz_int_wait && ctx.cfg_interrupt_rdy ) begin
+                    // assertion/deassertion accepted by the core
+                    rwi_mz_int_assert <= 0;
+                    rwi_mz_int_wait   <= 0;
+                end
+                else if ( !rwi_mz_int_wait && !mz_int_req && rwi_mz_int_level ) begin
+                    // lower: deassert INTx
+                    rwi_mz_int_level  <= 0;
+                    rwi_mz_int_assert <= 1;
+                    rwi_mz_int_wait   <= 1;
+                end
+                else if ( !rwi_mz_int_wait && !mz_int_req && !rwi_mz_int_level ) begin
+                    // deassertion complete: hand back to host bits
+                    rwi_mz_int_active <= 0;
+                end
+            end
+        end
+    end
     reg                 rwi_tlp_static_2nd;
     reg                 rwi_tlp_static_has_data;
     reg     [31:0]      rwi_count_cfgspace_status_cl;
@@ -212,7 +264,7 @@ module pcileech_pcie_cfg_a7(
             // SIZEOF / BYTECOUNT [little-endian]
             rw[63:32]   <= $bits(rw) >> 3;          // +004: bytecount [little endian]
             // DSN
-            rw[127:64]  <= 64'h0000000000000000;    // +008: cfg_dsn
+            rw[127:64]  <= 64'h0000000101000381;    // +008: cfg_dsn (mz0380 Rev.3 identity)
             // PCIe CFG MGMT
             rw[159:128] <= 0;                       // +010: cfg_mgmt_di
             rw[169:160] <= 0;                       // +014: cfg_mgmt_dwaddr
@@ -277,10 +329,12 @@ module pcileech_pcie_cfg_a7(
     assign ctx.pl_transmit_hot_rst          = rw[183];
     assign ctx.pl_downstream_deemph_source  = rw[184];
     
-    assign ctx.cfg_interrupt_di             = rw[199:192];
+    assign ctx.cfg_interrupt_di             = rwi_mz_int_active ? 8'h00 : rw[199:192];
     assign ctx.cfg_pciecap_interrupt_msgnum = rw[204:200];
-    assign ctx.cfg_interrupt_assert         = rw[205];
-    assign ctx.cfg_interrupt                = rw[206];
+    // INTx mux: the mz0380 FSM drives assert/level/deassert autonomously when
+    // active; otherwise the host-driven rw bits pass through unchanged.
+    assign ctx.cfg_interrupt_assert         = rwi_mz_int_active ? rwi_mz_int_assert : rw[205];
+    assign ctx.cfg_interrupt                = rwi_mz_int_active ? rwi_mz_int_level  : rw[206];
     assign ctx.cfg_interrupt_stat           = rw[207];
 
     assign ctx.cfg_pm_force_state           = rw[209:208];

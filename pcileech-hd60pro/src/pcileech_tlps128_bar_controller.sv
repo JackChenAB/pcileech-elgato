@@ -45,9 +45,18 @@ module pcileech_tlps128_bar_controller(
     input                   bar_en,
     input [15:0]            pcie_id,
     IfAXIS128.sink_lite     tlps_in,
-    IfAXIS128.source        tlps_out
-);
-    
+    IfAXIS128.source        tlps_out,
+    // mz0380 event bus (mailbox <-> DMA engine <-> CFG window)
+    output [255:0]          mz_vid_base,     // 4 x {hi,lo} phys, video window
+    output [2:0]            mz_vid_slots,
+    output                  mz_arm,          // START level
+    output                  mz_int_ack,      // doorbell 0x400 pulse
+    output                  mz_int_flag,     // BAR5[0xdc] state (to engine gate)
+    input                   mz_int_flag_set, // engine raises on frame done
+    input                   mz_frame_done,   // 1-cycle pulse from engine
+    input [31:0]            mz_frame_token
+    );
+
     // ------------------------------------------------------------------------
     // 1: TLP RECEIVE:
     // Receive incoming BAR requests from the TLP stream:
@@ -134,7 +143,7 @@ module pcileech_tlps128_bar_controller(
                         bar_rsp_valid[6] ? bar_rsp_data[6] : 0;
     assign rd_rsp_valid = bar_rsp_valid[0] || bar_rsp_valid[1] || bar_rsp_valid[2] || bar_rsp_valid[3] || bar_rsp_valid[4] || bar_rsp_valid[5] || bar_rsp_valid[6];
     
-    pcileech_bar_impl_zerowrite4k i_bar0(
+    pcileech_bar_impl_mz0380_mb i_bar0(
         .rst            ( rst                           ),
         .clk            ( clk                           ),
         .wr_addr        ( wr_addr                       ),
@@ -146,7 +155,14 @@ module pcileech_tlps128_bar_controller(
         .rd_req_valid   ( rd_req_valid && rd_req_bar[0] ),
         .rd_rsp_ctx     ( bar_rsp_ctx[0]                ),
         .rd_rsp_data    ( bar_rsp_data[0]               ),
-        .rd_rsp_valid   ( bar_rsp_valid[0]              )
+        .rd_rsp_valid   ( bar_rsp_valid[0]              ),
+        // mz0380 event bus
+        .mz_vid_base    ( mz_vid_base                   ),
+        .mz_vid_slots   ( mz_vid_slots                  ),
+        .mz_arm         ( mz_arm                        ),
+        .mz_int_ack     ( mz_int_ack                    ),
+        .mz_frame_done  ( mz_frame_done                 ),
+        .mz_frame_token ( mz_frame_token                )
     );
     
     pcileech_bar_impl_loopaddr i_bar1(
@@ -209,7 +225,7 @@ module pcileech_tlps128_bar_controller(
         .rd_rsp_valid   ( bar_rsp_valid[4]              )
     );
     
-    pcileech_bar_impl_none i_bar5(
+    pcileech_bar_impl_mz0380_cfg i_bar5(
         .rst            ( rst                           ),
         .clk            ( clk                           ),
         .wr_addr        ( wr_addr                       ),
@@ -221,7 +237,11 @@ module pcileech_tlps128_bar_controller(
         .rd_req_valid   ( rd_req_valid && rd_req_bar[5] ),
         .rd_rsp_ctx     ( bar_rsp_ctx[5]                ),
         .rd_rsp_data    ( bar_rsp_data[5]               ),
-        .rd_rsp_valid   ( bar_rsp_valid[5]              )
+        .rd_rsp_valid   ( bar_rsp_valid[5]              ),
+        // mz0380 interrupt handshake
+        .mz_int_flag_set( mz_int_flag_set               ),
+        .mz_int_ack     ( mz_int_ack                    ),
+        .mz_int_flag    ( mz_int_flag                   )
     );
     
     pcileech_bar_impl_none i_bar6_optrom(
@@ -381,6 +401,9 @@ module pcileech_tlps128_bar_wrengine(
                 first_dw    <= 0;
                 wr_be       <= first_dw ? be_first : (!tlast ? 4'hf : be_last);
                 state       <= !tlast ? `S_ENGINE_TX0 : `S_ENGINE_FIRST;
+            end
+            default: begin
+                state       <= `S_ENGINE_IDLE;
             end
         endcase
 
